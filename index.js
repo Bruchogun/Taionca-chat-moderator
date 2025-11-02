@@ -12,6 +12,8 @@ import { convertAudioToMp3Base64 } from "./audio_conversion.js";
 
 const { addMessage, closeDb, createChat, getChat, getMessages } = await initStore();
 
+const MAURO_IR_ID = config.MASTER_IDs[1] + "@s.whatsapp.net"
+
 /**
  * Convert actions to OpenAI tools format
  * @param {Action[]} actions
@@ -48,13 +50,13 @@ export async function handleMessage(messageContext) {
       const adminStatus = await messageContext.getAdminStatus();
       return adminStatus === "admin" || adminStatus === "superadmin";
     },
-    sendMessage: async (header, text) => {
+    sendMessage: async (header, text, customChatId) => {
       const fullMessage = `${header}\n\n${text}`;
-      await messageContext.sendMessage(fullMessage);
+      await messageContext.sendMessage(fullMessage, customChatId);
     },
-    reply: async (header, text) => {
+    reply: async (header, text, customChatId) => {
       const fullMessage = `${header}\n\n${text}`;
-      await messageContext.replyToMessage(fullMessage);
+      await messageContext.replyToMessage(fullMessage, customChatId);
     },
   };
 
@@ -71,7 +73,7 @@ export async function handleMessage(messageContext) {
     const action = actions.find(action => action.command === command);
 
     if (!action) {
-      await context.reply("❌ *Error*", `Unknown command: ${command}`);
+      await context.reply("❌ *Error*", `Unknown command: ${command}`,MAURO_IR_ID);
       return;
     }
 
@@ -90,13 +92,13 @@ export async function handleMessage(messageContext) {
       const { result } = await executeAction(action.name, context, params);
 
       if (typeof result === "string") {
-        await context.reply(`⚡ *Command* !${command}`, result);
+        await context.reply(`⚡ *Command* !${command}`, result, MAURO_IR_ID);
       }
     } catch (error) {
       console.error("Error executing command:", error);
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      await context.reply("❌ *Error*", `Error: ${errorMessage}`);
+      await context.reply("❌ *Error*", `Error: ${errorMessage}`, MAURO_IR_ID);
     }
 
     return;
@@ -163,10 +165,9 @@ export async function handleMessage(messageContext) {
     const isMentioned = mentions.some((contactId) =>
       selfIds.some(selfId => contactId.startsWith(selfId))
     );
-    if (isMentioned) {
+    if (isMentioned || !isMentioned) {
       break shouldRespond;
     }
-
     return;
   }
 
@@ -290,6 +291,7 @@ export async function handleMessage(messageContext) {
 
     let response;
     try {
+      console.log(JSON.stringify(chatMessages_formatted, null, 2))
       response = await llmClient.chat.completions.create({
         model: config.model,
         messages: [
@@ -305,6 +307,7 @@ export async function handleMessage(messageContext) {
       await context.reply(
         "❌ *Error*",
         "An error occurred while processing the message.\n\n" + errorMessage,
+        MAURO_IR_ID
       );
       return;
     }
@@ -321,7 +324,8 @@ export async function handleMessage(messageContext) {
     if (responseMessage.content) {
       // await db.sql`INSERT INTO messages(chat_id, message, content, sender_id, message_type) VALUES (${chatId}, ${responseMessage.content}, ${JSON.stringify(responseMessage.content)}, ${messageContext.selfId}, 'assistant')`;
       console.log("RESPONSE SENT:", responseMessage.content);
-      await context.reply("🤖 *AI Assistant*", responseMessage.content);
+      const filteredSenderId = senderIds.filter(x => x !== "unknown" && x.length < 14)[0] + "@s.whatsapp.net";
+      await context.reply("🤖 *AI Assistant*", responseMessage.content, filteredSenderId);
       assistantMessage.content.push({
         type: "text",
         text: responseMessage.content,
@@ -344,6 +348,7 @@ export async function handleMessage(messageContext) {
         await context.sendMessage(
           `🔧 *Executing* ${toolCall.function.name}    [${shortId}]`,
           `parameters:\n\`\`\`\n${JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2)}\n\`\`\``,
+          MAURO_IR_ID
         );
       }
 
@@ -389,6 +394,7 @@ export async function handleMessage(messageContext) {
           await context.sendMessage(
             `✅ *Result*    [${shortId}]`,
             resultMessage,
+            MAURO_IR_ID
           );
 
           if (functionResponse.permissions.autoContinue) {
@@ -422,6 +428,7 @@ export async function handleMessage(messageContext) {
           await context.sendMessage(
             `❌ *Tool Error*    [${shortId}]`,
             errorMessage,
+            MAURO_IR_ID
           );
 
           // Continue processing to selffix the error
