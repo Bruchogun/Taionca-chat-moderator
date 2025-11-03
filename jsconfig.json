@@ -3,17 +3,19 @@
         "target": "ES2022",
         "module": "ESNext",
         "moduleResolution": "node",
+        "resolveJsonModule": true,
         "allowJs": true,
         "checkJs": true,
         "strict": true,
         "noImplicitReturns": false,
-        "noUnusedLocals": true,
+        "noUnusedLocals": false,
         "noUnusedParameters": true,
         "esModuleInterop": true,
         "forceConsistentCasingInFileNames": true,
         "skipLibCheck": true,
         "declaration": true,
-        "declarationMap": true
+        "declarationMap": true,
+        "noImplicitAny": false
     },
     "include": ["**/*.js", "**/*.d.ts"],
     "exclude": ["node_modules", "*.bck.*"]

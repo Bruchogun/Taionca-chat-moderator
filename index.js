@@ -2,7 +2,7 @@
  * WhatsApp LLM Bot with JavaScript execution capabilities
  */
 
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
 import { shortenToolId } from "./utils.js";
@@ -15,18 +15,17 @@ const { addMessage, closeDb, createChat, getChat, getMessages } = await initStor
 const MAURO_IR_ID = config.MASTER_IDs[1] + "@s.whatsapp.net"
 
 /**
- * Convert actions to OpenAI tools format
+ * Convert actions to Gemini tools format (keeping for backward compatibility but not used)
  * @param {Action[]} actions
- * @returns {OpenAI.Chat.Completions.ChatCompletionTool[]}
+ * @returns {Array}
  */
-function actionsToOpenAIFormat(actions) {
+function actionsToGeminiFormat(actions) {
   return actions.map((action) => ({
-    type: "function",
-    function: {
+    functionDeclarations: [{
       name: action.name,
       description: action.description,
       parameters: action.parameters,
-    },
+    }],
   }));
 }
 
@@ -36,7 +35,7 @@ function actionsToOpenAIFormat(actions) {
  * @returns {Promise<void>}
  */
 export async function handleMessage(messageContext) {
-  const { chatId, senderIds, content, isGroup, senderName, selfIds, mentions } = messageContext;
+  const { chatId, senderIds, content, isGroup, senderName, selfIds, mentions, groupName } = messageContext; // added groupName
 
   console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
 
@@ -46,6 +45,7 @@ export async function handleMessage(messageContext) {
     chatId: chatId,
     senderIds,
     content: content,
+    groupName,
     getIsAdmin: async () => {
       const adminStatus = await messageContext.getAdminStatus();
       return adminStatus === "admin" || adminStatus === "superadmin";
@@ -57,6 +57,9 @@ export async function handleMessage(messageContext) {
     reply: async (header, text, customChatId) => {
       const fullMessage = `${header}\n\n${text}`;
       await messageContext.replyToMessage(fullMessage, customChatId);
+    },
+    deleteMessage: async (customChatId) => {
+      await messageContext.deleteMessage(customChatId);
     },
   };
 
@@ -131,8 +134,7 @@ export async function handleMessage(messageContext) {
 
       // TODO: Implement mention replacement using mentions
       messageBody_formatted = `[${time}] ${senderName}: ${cleanedContent}`;
-      // TODO: Get group chat name from high-level API
-      systemPrompt += `\n\nYou are in a group chat`;
+      systemPrompt += `\n\nNombre del grupo: "${groupName}"`;
     } else {
       messageBody_formatted = `[${time}] ${firstBlock.text}`;
     }
@@ -174,8 +176,8 @@ export async function handleMessage(messageContext) {
   // Get latest messages from DB
   const chatMessages = await getMessages(chatId)
 
-  // Prepare messages for OpenAI (reconstruct proper format with tool calls)
-  /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
+  // Prepare messages for Gemini (convert to Gemini format)
+  /** @type {Array} */
   const chatMessages_formatted = [];
   const reversedMessages = chatMessages.reverse();
 
@@ -187,29 +189,37 @@ export async function handleMessage(messageContext) {
   for (const msg of reversedMessages) {
     switch (msg.message_data?.role) {
       case "user":
-        /** @type {Array<OpenAI.ChatCompletionContentPart>} */
-        const messageContent = []
+        /** @type {Array} */
+        const messageParts = []
         for (const contentBlock of msg.message_data.content) {
           switch (contentBlock.type) {
             case "quote":
               for (const quoteBlock of contentBlock.content) {
                 switch (quoteBlock.type) {
                   case "text":
-                    messageContent.push({ type: "text", text: `> ${quoteBlock.text.trim().replace(/\n/g, '\n> ')}` });
+                    messageParts.push({ text: `> ${quoteBlock.text.trim().replace(/\n/g, '\n> ')}` });
                     break;
                   case "image":
-                    const dataUrl = `data:${quoteBlock.mime_type};base64,${quoteBlock.data}`;
-                    messageContent.push({ type: "image_url", image_url: { url: dataUrl } });
+                    messageParts.push({ 
+                      inlineData: { 
+                        data: quoteBlock.data,
+                        mimeType: quoteBlock.mime_type
+                      } 
+                    });
                     break;
                 }
               }
               break;
             case "text":
-              messageContent.push(contentBlock);
+              messageParts.push({ text: contentBlock.text });
               break;
             case "image":
-              const dataUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
-              messageContent.push({ type: "image_url", image_url: { url: dataUrl } });
+              messageParts.push({ 
+                inlineData: { 
+                  data: contentBlock.data,
+                  mimeType: contentBlock.mime_type
+                } 
+              });
               break;
             case "audio":
               let format = contentBlock.mime_type?.split("audio/")[1].split(";")[0];
@@ -221,12 +231,10 @@ export async function handleMessage(messageContext) {
               } else {
                 data = contentBlock.data;
               }
-              messageContent.push({
-                type: "input_audio",
-                input_audio: {
+              messageParts.push({
+                inlineData: {
                   data: data,
-                  // @ts-ignore
-                  format: format
+                  mimeType: `audio/${format}`
                 }
               });
               break;
@@ -234,41 +242,48 @@ export async function handleMessage(messageContext) {
         };
         chatMessages_formatted.push({
           role: "user",
-          name: msg.sender_id,
-          content: messageContent,
+          parts: messageParts,
         });
         break;
       case "assistant":
-        /** @type {OpenAI.ChatCompletionMessageToolCall[]} */
-        const toolCalls = [];
-        chatMessages_formatted.push({
-          role: "assistant",
-          content: msg.message_data.content.map( contentBlock => {
-            switch (contentBlock.type) {
-              case "text":
-                return contentBlock;
-              case "tool":
-                toolCalls.push({
-                  type: "function",
-                  id: contentBlock.tool_id,
-                  function: {
-                    name: contentBlock.name,
-                    arguments: contentBlock.arguments
-                  }
-                });
-            }
-          }).filter(x=>!!x),
-          tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-        });
+        /** @type {Array} */
+        const assistantParts = [];
+        for (const contentBlock of msg.message_data.content) {
+          switch (contentBlock.type) {
+            case "text":
+              assistantParts.push({ text: contentBlock.text });
+              break;
+            case "tool":
+              assistantParts.push({
+                functionCall: {
+                  name: contentBlock.name,
+                  args: JSON.parse(contentBlock.arguments)
+                }
+              });
+              break;
+          }
+        }
+        if (assistantParts.length > 0) {
+          chatMessages_formatted.push({
+            role: "model",
+            parts: assistantParts,
+          });
+        }
         break;
       case "tool":
-      for (const contentBlock of msg.message_data.content) {
+        for (const contentBlock of msg.message_data.content) {
           switch (contentBlock.type) {
             case "text":
               chatMessages_formatted.push({
-                role: "tool",
-                tool_call_id: msg.message_data.tool_id,
-                content: contentBlock.text,
+                role: "function",
+                parts: [{
+                  functionResponse: {
+                    name: msg.message_data.tool_id,
+                    response: {
+                      result: contentBlock.text
+                    }
+                  }
+                }]
               });
               break;
           }
@@ -282,9 +297,36 @@ export async function handleMessage(messageContext) {
   }
 
   // Initialize LLM client
-  const llmClient = new OpenAI({
-    apiKey: config.llm_api_key,
-    baseURL: config.base_url,
+  const genAI = new GoogleGenerativeAI(config.llm_api_key || "");
+  
+  // Configure the model with tools (deduplicate by name)
+  const seenNames = new Set();
+  /** @type {Action[]} */
+  const uniqueActions = [];
+  for (const action of actions) {
+    if (!seenNames.has(action.name)) {
+      seenNames.add(action.name);
+      uniqueActions.push(action);
+    }
+  }
+  
+  const toolsConfig = uniqueActions.length > 0 ? {
+    functionDeclarations: uniqueActions.map((action) => ({
+      name: action.name,
+      description: action.description,
+      parameters: {
+        type: "OBJECT",
+        properties: action.parameters.properties,
+        required: action.parameters.required,
+      },
+    }))
+  } : undefined;
+
+  const model = genAI.getGenerativeModel({ 
+    model: config.model,
+    systemInstruction: systemPrompt,
+    // @ts-ignore - Type mismatch with SchemaType
+    tools: toolsConfig ? [toolsConfig] : undefined,
   });
 
   async function processLlmResponse() {
@@ -292,15 +334,16 @@ export async function handleMessage(messageContext) {
     let response;
     try {
       console.log(JSON.stringify(chatMessages_formatted, null, 2))
-      response = await llmClient.chat.completions.create({
-        model: config.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...chatMessages_formatted,
-        ],
-        tools: actionsToOpenAIFormat(actions),
-        tool_choice: "auto",
+      
+      // Start chat with history
+      const chat = model.startChat({
+        history: chatMessages_formatted.slice(0, -1), // All messages except the last one
       });
+      
+      // Send the last message
+      const lastMessage = chatMessages_formatted[chatMessages_formatted.length - 1];
+      const result = await chat.sendMessage(lastMessage.parts);
+      response = result.response;
     } catch (error) {
       console.error(error);
       const errorMessage = JSON.stringify(error, null, 2);
@@ -312,7 +355,15 @@ export async function handleMessage(messageContext) {
       return;
     }
 
-    const responseMessage = response.choices[0].message;
+    // Get response text (may be empty if only function calls)
+    let responseText = "";
+    try {
+      responseText = response.text();
+    } catch (e) {
+      // No text content, only function calls
+      console.log("No text content in response");
+    }
+    const functionCalls = response.functionCalls();
 
     // Add assistant message to conversation context
     /** @type {AssistantMessage} */
@@ -321,49 +372,66 @@ export async function handleMessage(messageContext) {
       content: [],
     };
 
-    if (responseMessage.content) {
-      // await db.sql`INSERT INTO messages(chat_id, message, content, sender_id, message_type) VALUES (${chatId}, ${responseMessage.content}, ${JSON.stringify(responseMessage.content)}, ${messageContext.selfId}, 'assistant')`;
-      console.log("RESPONSE SENT:", responseMessage.content);
-      const filteredSenderId = senderIds.filter(x => x !== "unknown" && x.length < 14)[0] + "@s.whatsapp.net";
-      await context.reply("🤖 *AI Assistant*", responseMessage.content, filteredSenderId);
+    if (responseText && responseText.trim()) {
+      console.log("RESPONSE SENT:", responseText);
+      // const filteredSenderId = senderIds.filter(x => x !== "unknown" && x.length < 14)[0] + "@s.whatsapp.net";
+      // await context.reply("🤖 *AI Assistant*", responseText, filteredSenderId);
       assistantMessage.content.push({
         type: "text",
-        text: responseMessage.content,
+        text: responseText,
       });
     }
 
 
-    if (responseMessage.tool_calls) {
+    if (functionCalls && functionCalls.length > 0) {
       // Add tool calls to assistant message
-      for (const toolCall of responseMessage.tool_calls) {
+      for (const functionCall of functionCalls) {
+        const toolId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         assistantMessage.content.push({
           type: "tool",
-          tool_id: toolCall.id,
-          name: toolCall.function.name,
-          arguments: toolCall.function.arguments
+          tool_id: toolId,
+          name: functionCall.name,
+          arguments: JSON.stringify(functionCall.args)
         })
 
         // Show tool call to user
-        const shortId = shortenToolId(toolCall.id);
-        await context.sendMessage(
-          `🔧 *Executing* ${toolCall.function.name}    [${shortId}]`,
-          `parameters:\n\`\`\`\n${JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2)}\n\`\`\``,
-          MAURO_IR_ID
-        );
+        const shortId = shortenToolId(toolId);
+        // await context.sendMessage(
+        //   `🔧 *Executing* ${functionCall.name}    [${shortId}]`,
+        //   `parameters:\n\`\`\`\n${JSON.stringify(functionCall.args, null, 2)}\n\`\`\``,
+        //   MAURO_IR_ID
+        // );
       }
 
       // Store tool calls in database
       await addMessage(chatId, assistantMessage, senderIds)
 
       // Add assistant message with tool calls to conversation context
-      chatMessages_formatted.push(responseMessage);
+      chatMessages_formatted.push({
+        role: "model",
+        parts: functionCalls.map(fc => ({
+          functionCall: {
+            name: fc.name,
+            args: fc.args
+          }
+        }))
+      });
 
       let continueProcessing = false;
 
-      for (const toolCall of responseMessage.tool_calls) {
-        const toolName = toolCall.function.name;
-        const toolArgs = JSON.parse(toolCall.function.arguments);
-        const shortId = shortenToolId(toolCall.id);
+      // Create a map of function names to tool IDs
+      const toolIdMap = new Map();
+      for (const content of assistantMessage.content) {
+        if (content.type === "tool") {
+          toolIdMap.set(content.name, content.tool_id);
+        }
+      }
+
+      for (const functionCall of functionCalls) {
+        const toolName = functionCall.name;
+        const toolArgs = { ...functionCall.args, groupName };// added groupName
+        const toolId = toolIdMap.get(toolName);
+        const shortId = shortenToolId(toolId);
         console.log("executing", toolName, toolArgs);
 
         try {
@@ -371,7 +439,7 @@ export async function handleMessage(messageContext) {
             toolName,
             context,
             toolArgs,
-            toolCall.id,
+            toolId,
           );
           console.log("response", functionResponse);
 
@@ -380,7 +448,7 @@ export async function handleMessage(messageContext) {
             /** @type {ToolMessage} */
             const toolMessage = {
               role: "tool",
-              tool_id: toolCall.id,
+              tool_id: toolId,
               content: [{type: "text", text: JSON.stringify(functionResponse.result)}]
             }
             await addMessage(chatId, toolMessage, senderIds)
@@ -391,11 +459,11 @@ export async function handleMessage(messageContext) {
               ? functionResponse.result
               : JSON.stringify(functionResponse.result, null, 2);
           // Show tool result to user
-          await context.sendMessage(
-            `✅ *Result*    [${shortId}]`,
-            resultMessage,
-            MAURO_IR_ID
-          );
+          // await context.sendMessage(
+          //   `✅ *Result*    [${shortId}]`,
+          //   resultMessage,
+          //   MAURO_IR_ID
+          // );
 
           if (functionResponse.permissions.autoContinue) {
             // If the tool result indicates to continue processing, set flag
@@ -403,13 +471,17 @@ export async function handleMessage(messageContext) {
           }
 
           // Add tool result to conversation context
-          /** @type {OpenAI.ChatCompletionMessageParam} */
-          const toolResultMessage = {
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: resultMessage,
-          };
-          chatMessages_formatted.push(toolResultMessage);
+          chatMessages_formatted.push({
+            role: "function",
+            parts: [{
+              functionResponse: {
+                name: toolName,
+                response: {
+                  result: resultMessage
+                }
+              }
+            }]
+          });
 
         } catch (error) {
           console.error("Error executing tool:", error);
@@ -418,10 +490,9 @@ export async function handleMessage(messageContext) {
           /** @type {ToolMessage} */
           const toolError = {
             role: "tool",
-            tool_id: toolCall.id,
+            tool_id: toolId,
             content: [{type: "text", text: errorMessage}],
           }
-          // await db.sql`INSERT INTO messages(chat_id, message, content, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${errorMessage}, ${JSON.stringify(errorMessage)}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
           await addMessage(chatId, toolError, senderIds)
 
           // Show tool error to user
@@ -435,13 +506,17 @@ export async function handleMessage(messageContext) {
           continueProcessing = true;
 
           // Add tool error to conversation context
-          /** @type {OpenAI.ChatCompletionMessageParam} */
-          const toolResultMessage = {
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: errorMessage,
-          };
-          chatMessages_formatted.push(toolResultMessage);
+          chatMessages_formatted.push({
+            role: "function",
+            parts: [{
+              functionResponse: {
+                name: toolName,
+                response: {
+                  error: errorMessage
+                }
+              }
+            }]
+          });
         }
 
       }
@@ -452,8 +527,9 @@ export async function handleMessage(messageContext) {
       }
     } else {
       // Only add assistant message if no tool calls (to avoid duplicates)
-      chatMessages_formatted.push(responseMessage);
-      await addMessage(chatId, assistantMessage, senderIds);
+      if (assistantMessage.content.length > 0) {
+        await addMessage(chatId, assistantMessage, senderIds);
+      }
     }
   }
 

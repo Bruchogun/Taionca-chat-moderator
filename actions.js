@@ -46,6 +46,7 @@ export async function executeAction(
     chatId: context.chatId,
     senderIds: context.senderIds,
     content: context.content,
+    groupName: context.groupName,
     getIsAdmin: context.getIsAdmin,
     sessionDb: currentSessionDb,
     getActions,
@@ -58,8 +59,11 @@ export async function executeAction(
     sendMessage: async (message) => {
       await context.sendMessage(`🔧 *Action*    [${shortId}]`, message);
     },
-    reply: async (message) => {
-      await context.reply(`🔧 *Action*    [${shortId}]`, message);
+    reply: async (message, customChatId) => {
+      await context.reply(`🔧 *Action*    `, message, customChatId);
+    },
+    deleteMessage: async (customChatId) => {
+      await context.deleteMessage(customChatId);
     },
   };
 

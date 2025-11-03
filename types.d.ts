@@ -74,12 +74,14 @@ type IncomingContext = {
   senderName: string;
   content: IncomingContentBlock[];
   isGroup: boolean;
+  groupName: string; // added groupName
   timestamp: Date;
 
   // High-level actions scoped to this message
   getAdminStatus: () => Promise<"admin" | "superadmin" | null>;
-  sendMessage: (text: string) => Promise<void>;
-  replyToMessage: (text: string) => Promise<void>;
+  sendMessage: (text: string, customChatId?: string) => Promise<void>;
+  replyToMessage: (text: string, customChatId?: string) => Promise<void>;
+  deleteMessage: (customChatId?: string) => Promise<void>;
 
   // Bot info
   selfIds: string[];
@@ -94,9 +96,11 @@ type Context = {
   chatId: string;
   senderIds: string[];
   content: IncomingContentBlock[];
+  groupName: string;
   getIsAdmin: () => Promise<boolean>;
-  sendMessage: (header: string, message: string) => Promise<void>;
-  reply: (header: string, message: string) => Promise<void>;
+  sendMessage: (header: string, message: string, customChatId?: string) => Promise<void>;
+  reply: (header: string, message: string, customChatId?: string) => Promise<void>;
+  deleteMessage: (customChatId?: string) => Promise<void>;
 };
 
 /* Actions */
@@ -106,12 +110,14 @@ type ActionContext = {
   chatId: string;
   senderIds: string[];
   content: IncomingContentBlock[];
+  groupName: string;
   getIsAdmin: () => Promise<boolean>;
   sessionDb: PGlite;
   getActions: () => Promise<Action[]>;
   log: (...args: any[]) => Promise<string>;
-  sendMessage: (message: string) => Promise<void>; // Header already baked in
-  reply: (message: string) => Promise<void>; // Header already baked in
+  sendMessage: (message: string, customChatId?: string) => Promise<void>; // Header already baked in
+  reply: (message: string, customChatId?: string) => Promise<void>; // Header already baked in
+  deleteMessage: (customChatId?: string) => Promise<void>;
 };
 
 // Define permission flags

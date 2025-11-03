@@ -188,14 +188,17 @@ async function adaptIncomingMessage(baileysMessage, sock) {
   const chatId = baileysMessage.key.remoteJid || "";
   /** @type {string[]} */
   const senderIds = []
-  senderIds.push(baileysMessage.key.participant || baileysMessage.key.remoteJid || "unknown")
+  // @ts-ignore
+  senderIds.push(baileysMessage.key.participant || baileysMessage.key.remoteJid || baileysMessage.key.participantPn || "unknown")
   senderIds.push( // @ts-ignore
     baileysMessage.key.participantLid // @ts-ignore
     || baileysMessage.key.participantPid // @ts-ignore
     || baileysMessage.key.senderLid // @ts-ignore
     || baileysMessage.key.senderPid // @ts-ignore
+    || baileysMessage.key.participantPn
     || "unknown"
   )
+  console.log(baileysMessage)
 
   const isGroup = !!chatId?.endsWith("@g.us");
 
@@ -217,6 +220,17 @@ async function adaptIncomingMessage(baileysMessage, sock) {
     if (lid) selfIds.push(lid);
   }
 
+  // Get group name if in a group // added groupName
+  let groupName = "";
+  if (isGroup) {
+    try {
+      const groupMetadata = await sock.groupMetadata(chatId);
+      groupName = groupMetadata.subject || "";
+    } catch (error) {
+      console.error("Error getting group name:", error);
+    }
+  }
+
   /** @type {IncomingContext} */
   const messageContext = {
     // Message data
@@ -225,6 +239,7 @@ async function adaptIncomingMessage(baileysMessage, sock) {
     senderName: baileysMessage.pushName || "",
     content: content,
     isGroup,
+    groupName, // added groupName
     timestamp,
 
     // High-level actions scoped to this message
@@ -242,12 +257,16 @@ async function adaptIncomingMessage(baileysMessage, sock) {
       }
     },
 
-    sendMessage: async (text) => {
-      await sock.sendMessage(chatId, { text });
+    sendMessage: async (text, customChatId) => {
+      await sock.sendMessage(customChatId || chatId, { text });
     },
 
-    replyToMessage: async (text) => {
-      await sock.sendMessage(chatId, { text }, { quoted: baileysMessage });
+    replyToMessage: async (text, customChatId = undefined) => {
+      await sock.sendMessage(customChatId || chatId, { text }, { quoted: baileysMessage });
+    },
+
+    deleteMessage: async (customChatId = undefined) => {
+      await sock.sendMessage(customChatId || chatId, { delete: baileysMessage.key });
     },
 
     // Bot info

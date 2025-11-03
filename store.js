@@ -76,7 +76,7 @@ export async function initStore(){
       * @param {ChatRow['chat_id']} chatId
       * @param {number} limit
       */
-      async getMessages (chatId, limit = 50) {
+      async getMessages (chatId, limit = 1) {
         const {rows: messages} = await db.sql`SELECT * FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT ${limit}`;
         // messages.message_data = JSON.parse(messages.message_data);
         return /** @type {MessageRow[]} */ (messages);
