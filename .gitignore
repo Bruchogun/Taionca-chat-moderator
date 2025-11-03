@@ -9,3 +9,5 @@ pgdata
 auth_info_baileys
 credentials.json
 package-lock.json
+*.sh
+*.log
