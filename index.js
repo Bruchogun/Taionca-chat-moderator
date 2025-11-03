@@ -9,6 +9,7 @@ import { shortenToolId } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { initStore } from "./store.js";
 import { convertAudioToMp3Base64 } from "./audio_conversion.js";
+import './api.js'; // Importar y ejecutar la API
 
 const { addMessage, closeDb, createChat, getChat, getMessages } = await initStore();
 

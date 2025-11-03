@@ -16,9 +16,11 @@
     "dependencies": {
         "@electric-sql/pglite": "^0.3.3",
         "@google/generative-ai": "^0.24.1",
+        "@polka/parse": "^1.0.0-next.0",
         "@whiskeysockets/baileys": "^6.7.19",
         "dotenv": "^16.5.0",
-        "openai": "^4.104.0"
+        "openai": "^4.104.0",
+        "polka": "^0.5.2"
     },
     "devDependencies": {
         "@types/node": "^20.19.0",

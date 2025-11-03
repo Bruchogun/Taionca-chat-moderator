@@ -11,6 +11,10 @@ import {
 import { exec } from "child_process";
 import { handleMessage } from "./index.js";
 
+// Export sock instance for API access
+/** @type {BaileysSocket | null} */
+export let sock = null;
+
 /**
  *
  * @param {BaileysMessage} baileysMessage
@@ -293,7 +297,7 @@ export async function connectToWhatsApp(onMessageHandler) {
     "./auth_info_baileys",
   );
 
-  const sock = makeWASocket({
+  sock = makeWASocket({
     auth: state,
     browser: ["WhatsApp LLM Bot", "Chrome", "1.0.0"],
   });
@@ -328,12 +332,14 @@ export async function connectToWhatsApp(onMessageHandler) {
         }
       } else if (connection === "open") {
         console.log("WhatsApp connection opened");
-        const lid = sock.user?.lid?.split(":")[0] || sock.user?.lid;
-        const id = sock.user?.id?.split(":")[0] || sock.user?.id;
-        const selfIds = [];
-        if (id) selfIds.push(id);
-        if (lid) selfIds.push(lid);
-        console.log("Self IDs:", selfIds, JSON.stringify(sock.user, null, 2));
+        if (sock) {
+          const lid = sock.user?.lid?.split(":")[0] || sock.user?.lid;
+          const id = sock.user?.id?.split(":")[0] || sock.user?.id;
+          const selfIds = [];
+          if (id) selfIds.push(id);
+          if (lid) selfIds.push(lid);
+          console.log("Self IDs:", selfIds, JSON.stringify(sock.user, null, 2));
+        }
       }
     }
 
@@ -345,7 +351,9 @@ export async function connectToWhatsApp(onMessageHandler) {
       const { messages } = events["messages.upsert"];
       for (const message of messages) {
         if (message.key.fromMe || !message.message) continue;
-        await adaptIncomingMessage(message, sock);
+        if (sock) {
+          await adaptIncomingMessage(message, sock);
+        }
       }
     }
   });
