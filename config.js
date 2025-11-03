@@ -20,3 +20,4 @@ export default {
   base_url: process.env.BASE_URL,
   system_prompt: process.env.SYSTEM_PROMPT || system_prompt,
 };
+
