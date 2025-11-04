@@ -38,7 +38,8 @@ app.get('/', (_req, res) => {
       messages: {
         send: 'POST /api/messages/send',
         reply: 'POST /api/messages/reply',
-        delete: 'DELETE /api/messages/:messageId'
+        delete: 'DELETE /api/messages/:messageId',
+        getChat: 'GET /api/messages/chat/:chatId'
       },
     }
   }));

@@ -118,7 +118,9 @@ export async function handleMessage(messageContext) {
   });
 
   // Insert chatId into DB if not already present
-  await createChat(chatId);
+  // Use groupName for groups, or senderName for individual chats
+  const chatName = isGroup ? groupName : senderName;
+  await createChat(chatId, chatName);
 
 
   // Get system prompt from current chat or use default

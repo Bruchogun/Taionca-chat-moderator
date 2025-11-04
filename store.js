@@ -3,6 +3,7 @@ import { getDb } from "./db.js";
 /**
  * @typedef {{
  *   chat_id: string;
+ *   name: string;
  *   is_enabled: boolean;
  *   system_prompt: string;
  *   timestamp: string;
@@ -44,6 +45,7 @@ export async function initStore(){
     // Add new columns if they don't exist (for existing databases)
     try {
       await Promise.all([
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS name TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT FALSE`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS system_prompt TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_data JSONB`,
@@ -84,9 +86,10 @@ export async function initStore(){
 
       /**
       * @param {ChatRow['chat_id']} chatId
+      * @param {ChatRow['name']?} name
       */
-      async createChat (chatId) {
-        await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
+      async createChat (chatId, name = null) {
+        await db.sql`INSERT INTO chats(chat_id, name) VALUES (${chatId}, ${name}) ON CONFLICT (chat_id) DO UPDATE SET name = COALESCE(EXCLUDED.name, chats.name);`;
       },
 
       /**

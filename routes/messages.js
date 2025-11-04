@@ -1,4 +1,8 @@
 import { sock } from '../whatsapp-adapter.js';
+import { getDb } from '../db.js';
+import { todo } from 'node:test';
+
+const db = getDb('./pgdata/root');
 
 /**
  * Monta las rutas de mensajes en la aplicación
@@ -127,6 +131,60 @@ export function mount(prefix, app) {
       res.end(JSON.stringify({ 
         success: true 
       }));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ 
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }));
+    }
+  });
+
+  // GET /chat/:chatId - Get chat information
+  app.get(`${prefix}/chat/:chatId`, async (req, res) => {
+    try {
+      const chatId = decodeURIComponent(req.params.chatId);
+      console.log("Este es el chat id", chatId);
+
+      if (!chatId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ 
+          success: false,
+          error: 'chatId is required' 
+        }));
+      }
+
+      // Get chat info
+      const { rows: [chatInfo] } = await db.sql`
+        SELECT * FROM chats WHERE chat_id = ${chatId} LIMIT 1
+      `;
+
+      if (!chatInfo) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ 
+          success: false,
+          error: 'Chat not found' 
+        }));
+      }
+
+      // Get message count
+      const { rows: [{ count }] } = await db.sql`
+        SELECT COUNT(*) as count FROM messages WHERE chat_id = ${chatId}
+      `;
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ 
+        success: true,
+        data: {
+          chat_id: chatInfo.chat_id,
+          name: chatInfo.name,
+          is_enabled: chatInfo.is_enabled,
+          system_prompt: chatInfo.system_prompt,
+          created_at: chatInfo.timestamp,
+          message_count: parseInt(count),
+        }
+      }));
+
     } catch (error) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ 
