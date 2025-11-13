@@ -11,6 +11,23 @@ import {
 import { exec } from "child_process";
 import { handleMessage } from "./index.js";
 
+/** @typedef {import("@hapi/boom").Boom<unknown>} BoomError */
+/** @typedef {import("@whiskeysockets/baileys").WAMessage} WAMessage */
+/** @typedef {import("@whiskeysockets/baileys").WAMessageKey} WAMessageKey */
+
+/**
+ * Type guard to detect Boom errors returned by Baileys.
+ * @param {unknown} error
+ * @returns {error is BoomError}
+ */
+function isBoomError(error) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = /** @type {Record<string, unknown>} */ (error);
+  return candidate.isBoom === true && "output" in candidate;
+}
+
 // Export sock instance for API access
 /** @type {BaileysSocket | null} */
 export let sock = null;
@@ -85,8 +102,9 @@ async function getMessageContent(baileysMessage) {
 
   if (imageMessage) {
     // Handle image message
+    const messageForDownload = /** @type {WAMessage} */ (baileysMessage);
     const imageBuffer = await downloadMediaMessage(
-      baileysMessage,
+      messageForDownload,
       "buffer",
       {},
     );
@@ -116,8 +134,9 @@ async function getMessageContent(baileysMessage) {
 
   if (videoMessage) {
     // Handle video message
+    const messageForDownload = /** @type {WAMessage} */ (baileysMessage);
     const videoBuffer = await downloadMediaMessage(
-      baileysMessage,
+      messageForDownload,
       "buffer",
       {},
     );
@@ -140,8 +159,9 @@ async function getMessageContent(baileysMessage) {
 
   if (audioMessage) {
     // Handle audio message
+    const messageForDownload = /** @type {WAMessage} */ (baileysMessage);
     const audioBuffer = await downloadMediaMessage(
-      baileysMessage,
+      messageForDownload,
       "buffer",
       {},
     );
@@ -179,6 +199,11 @@ async function getMessageContent(baileysMessage) {
 async function adaptIncomingMessage(baileysMessage, sock) {
   // Extract message content from Baileys format
   // Ignore status updates
+  if (!baileysMessage.key?.remoteJid) {
+    console.warn("Skipping message with missing remoteJid", baileysMessage);
+    return;
+  }
+
   if (baileysMessage.key.remoteJid === "status@broadcast") {
     return;
   }
@@ -189,20 +214,27 @@ async function adaptIncomingMessage(baileysMessage, sock) {
     return
   }
 
-  const chatId = baileysMessage.key.remoteJid || "";
+  const messageKey = /** @type {WAMessageKey} */ (baileysMessage.key);
+  const chatId = messageKey.remoteJid || "";
   /** @type {string[]} */
-  const senderIds = []
-  // @ts-ignore
-  senderIds.push(baileysMessage.key.participant || baileysMessage.key.remoteJid || baileysMessage.key.participantPn || "unknown")
-  senderIds.push( // @ts-ignore
-    baileysMessage.key.participantLid // @ts-ignore
-    || baileysMessage.key.participantPid // @ts-ignore
-    || baileysMessage.key.senderLid // @ts-ignore
-    || baileysMessage.key.senderPid // @ts-ignore
-    || baileysMessage.key.participantPn
-    || "unknown"
-  )
-  console.log(baileysMessage)
+  const senderIds = [];
+  const keyInfo = /** @type {Partial<Record<string, string | undefined>>} */ (messageKey ?? {});
+  const idCandidates = [
+    keyInfo.participant,
+    keyInfo.remoteJid,
+    keyInfo.participantPn,
+    keyInfo.participantLid,
+    keyInfo.participantPid,
+    keyInfo.senderLid,
+    keyInfo.senderPid,
+  ];
+
+  for (const candidate of idCandidates) {
+    if (candidate && !senderIds.includes(candidate)) {
+      senderIds.push(candidate);
+    }
+  }
+  console.log("New baileysMessage", baileysMessage, "New baileysMessage");
 
   const isGroup = !!chatId?.endsWith("@g.us");
 
@@ -239,7 +271,7 @@ async function adaptIncomingMessage(baileysMessage, sock) {
   const messageContext = {
     // Message data
     chatId,
-    senderIds: senderIds.map(id => id.split("@")[0]),
+    senderIds: senderIds,
     senderName: baileysMessage.pushName || "",
     content: content,
     isGroup,
@@ -266,11 +298,12 @@ async function adaptIncomingMessage(baileysMessage, sock) {
     },
 
     replyToMessage: async (text, customChatId = undefined) => {
-      await sock.sendMessage(customChatId || chatId, { text }, { quoted: baileysMessage });
+      const quotedMessage = /** @type {WAMessage} */ (baileysMessage);
+      await sock.sendMessage(customChatId || chatId, { text }, { quoted: quotedMessage });
     },
 
     deleteMessage: async (customChatId = undefined) => {
-      await sock.sendMessage(customChatId || chatId, { delete: baileysMessage.key });
+      await sock.sendMessage(customChatId || chatId, { delete: messageKey });
     },
 
     // Bot info
@@ -319,15 +352,27 @@ export async function connectToWhatsApp(onMessageHandler) {
       }
 
       if (connection === "close") {
-        const shouldReconnect = lastDisconnect?.error?.message !== "logged out";
+        const rawError = lastDisconnect?.error;
+        const errorMessage =
+          rawError && typeof rawError === "object" && "message" in rawError && typeof rawError.message === "string"
+            ? rawError.message
+            : "";
+        const shouldReconnect = errorMessage !== "logged out";
+        const statusCode = isBoomError(rawError)
+          ? rawError.output?.statusCode
+          : undefined;
+
         console.log(
           "Connection closed due to ",
-          lastDisconnect?.error,
+          rawError,
+          ", status code:",
+          statusCode,
           ", reconnecting ",
           shouldReconnect,
         );
+
         if (shouldReconnect) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
           await connectToWhatsApp(onMessageHandler);
         }
       } else if (connection === "open") {

@@ -13,7 +13,7 @@ import './api.js'; // Importar y ejecutar la API
 
 const { addMessage, closeDb, createChat, getChat, getMessages } = await initStore();
 
-const MAURO_IR_ID = config.MASTER_IDs[1] + "@s.whatsapp.net"
+const MAURO_IR_ID = config.MASTER_IDs[1]
 
 /**
  * Convert actions to Gemini tools format (keeping for backward compatibility but not used)
@@ -332,7 +332,7 @@ export async function handleMessage(messageContext) {
     tools: toolsConfig ? [toolsConfig] : undefined,
   });
 
-  async function processLlmResponse() {
+  async function processLlmResponse() {//Modularizar esto
 
     let response;
     try {

@@ -18,12 +18,14 @@ export default  /** @type {defineAction} */ ((x) => x)({
 
   action_fn: async function ({ reply, deleteMessage, senderIds }) {
 
-    const filteredSenderId = senderIds.filter(x => x !== "unknown" && x.length < 14)[0] + "@s.whatsapp.net";
+    console.log("Sender ID:", senderIds);
     // Notify about the error
-    reply("❌ No se pudo extraer la información del mensaje. Por favor revisa el formato.", filteredSenderId);
+    console.log("Antes de reply")
+    await reply("❌ No se pudo extraer la información del mensaje. Por favor revisa el formato.", senderIds[0]);
+    console.log("Antes de deleteMessage")
     // Delete the original message
     await deleteMessage();
-    
+    console.log("Después de deleteMessage")
 
     return "Message deleted due to parsing error"
   },

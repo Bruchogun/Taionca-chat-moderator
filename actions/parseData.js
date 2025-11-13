@@ -31,7 +31,6 @@ export default  /** @type {defineAction} */ ((x) => x)({
   },
 
   action_fn: async function ({ reply, senderIds, groupName }, params) {
-    const filteredSenderId = senderIds.filter(x => x !== "unknown" && x.length < 14)[0] + "@s.whatsapp.net";
     const serviceAccountKey = credentials
     const sheets = new SheetsManager(serviceAccountKey);
     const sheetId = process.env.GOOGLE_SHEET_ID || '1onMiSNkiVTxjQ9rRPVH844FFTvGAwfZlwM_obQX8VFk';
@@ -49,7 +48,7 @@ export default  /** @type {defineAction} */ ((x) => x)({
 
     reply(
       `Ha sido registrado el siguiente movimiento:\n\n- *ODT*: ${params.odt_id}\n- *Descripción*: ${params.description}\n- *Monto*: ${curency}${params.amount}`, 
-      filteredSenderId);
+      senderIds[0]);
 
     // Note: Share your spreadsheet with the service account email
     // (found in serviceAccountKey.client_email) to grant access
