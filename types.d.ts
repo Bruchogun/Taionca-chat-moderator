@@ -76,12 +76,7 @@ type IncomingContext = {
   isGroup: boolean;
   groupName: string; // added groupName
   timestamp: Date;
-
-  // High-level actions scoped to this message
-  getAdminStatus: () => Promise<"admin" | "superadmin" | null>;
-  sendMessage: (text: string, customChatId?: string) => Promise<void>;
-  replyToMessage: (text: string, customChatId?: string) => Promise<void>;
-  deleteMessage: (customChatId?: string) => Promise<void>;
+  rawMessage: BaileysMessage;
 
   // Bot info
   selfIds: string[];
@@ -97,10 +92,11 @@ type Context = {
   senderIds: string[];
   content: IncomingContentBlock[];
   groupName: string;
-  getIsAdmin: () => Promise<boolean>;
-  sendMessage: (header: string, message: string, customChatId?: string) => Promise<void>;
-  reply: (header: string, message: string, customChatId?: string) => Promise<void>;
-  deleteMessage: (customChatId?: string) => Promise<void>;
+  rawMessage: BaileysMessage;
+  // getIsAdmin: () => Promise<boolean>;
+  // sendMessage: (header: string, message: string, customChatId?: string) => Promise<void>;
+  // reply: (header: string, message: string, customChatId?: string) => Promise<void>;
+  // deleteMessage: (customChatId?: string) => Promise<void>;
 };
 
 /* Actions */

@@ -16,7 +16,20 @@ import { getDb } from "./db.js";
  *   message_data: Message;
  *   timestamp: Date;
  * }} MessageRow
+ *
+ * @typedef {{
+ *   chatMessages_formatted: Array,
+ *   context: Context,
+ *   chatId: string,
+ *   senderIds: string[],
+ *   groupName: string,
+ *   addMessage: (chatId: string, message: Message, senderIds: string[]) => Promise<any>,
+ *   id_master: string,
+ *   systemPrompt: string,
+ *   error: string,
+ * }} queuedMessage
  */
+
 
 export async function initStore(){
     // Initialize database
@@ -38,6 +51,21 @@ export async function initStore(){
             chat_id VARCHAR(50) REFERENCES chats(chat_id),
             sender_id VARCHAR(50),
             message_data JSONB,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `;
+
+        await db.sql`
+        CREATE TABLE IF NOT EXISTS queued_messages (
+            queued_message_id SERIAL PRIMARY KEY,
+            chatMessages_formatted JSONB NOT NULL,
+            context JSONB NOT NULL,
+            chatId TEXT NOT NULL,
+            senderIds JSONB NOT NULL,
+            groupName TEXT NOT NULL,
+            id_master TEXT NOT NULL,
+            systemPrompt TEXT NOT NULL,
+            error TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `;
@@ -71,7 +99,6 @@ export async function initStore(){
       closeDb () {
         console.log("Closing database...");
         return db.close();
-        console.log("Database closed");
       },
 
       /**
@@ -102,6 +129,33 @@ export async function initStore(){
           VALUES (${chatId}, ${senderIds?.join(",")}, ${message_data})
           RETURNING *`;
         return /** @type {MessageRow} */ (message);
+      },
+
+            /**
+      * @param {queuedMessage['chatMessages_formatted']} chatMessages_formatted
+      * @param {queuedMessage['context']} context
+      * @param {queuedMessage['chatId']} chatId
+      * @param {queuedMessage['senderIds']} senderIds
+      * @param {queuedMessage['groupName']} groupName
+      * @param {queuedMessage['id_master']} id_master
+      * @param {queuedMessage['systemPrompt']} systemPrompt
+      * @param {queuedMessage['error']} error
+      */
+      async addMessageToQueue (chatMessages_formatted, context, chatId, senderIds, groupName, id_master, systemPrompt, error) {
+        const {rows: [queued]} = await db.sql`INSERT INTO queued_messages(chatMessages_formatted, context, chatId, senderIds, groupName, id_master, systemPrompt, error)
+          VALUES (${chatMessages_formatted}, ${context}, ${chatId}, ${senderIds}, ${groupName}, ${id_master}, ${systemPrompt}, ${error})
+          RETURNING *`;
+        return /** @type {queuedMessage} */ (queued);
+      },
+
+      async getQueuedMessages(limit = 10) {
+        const { rows } = await db.sql`SELECT * FROM queued_messages ORDER BY queued_message_id ASC LIMIT ${limit}`;
+        return (rows);
+      },
+
+      async deleteQueuedMessage(queued_message_id) {
+        const { rows } = await db.sql`DELETE FROM queued_messages WHERE queued_message_id = ${queued_message_id} RETURNING *`;
+        return (rows);
       },
     }
 }

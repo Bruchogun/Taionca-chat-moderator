@@ -3,6 +3,7 @@ import path from "path";
 import { getDb } from "./db.js";
 import config from "./config.js";
 import { shortenToolId } from "./utils.js";
+import { deleteMessage, getIsAdmin, replyToMessage, sendMessage } from "./whatsapp-adapter.js";
 
 const currentSessionDb = getDb("memory://");
 
@@ -27,7 +28,7 @@ export async function executeAction(
     throw new Error(`Action "${actionName}" not found`);
   }
 
-  if (action.permissions?.requireAdmin && !context.getIsAdmin()) {
+  if (action.permissions?.requireAdmin && !getIsAdmin(context.chatId, context.senderIds)) {
     throw new Error(`Action "${actionName}" requires admin permissions`);
   }
 
@@ -47,30 +48,32 @@ export async function executeAction(
     senderIds: context.senderIds,
     content: context.content,
     groupName: context.groupName,
-    getIsAdmin: context.getIsAdmin,
+    getIsAdmin: () => getIsAdmin(context.chatId, context.senderIds),
     sessionDb: currentSessionDb,
     getActions,
     log: async (...args) => {
       const message = args.join(" ");
       console.log(...args);
-      await context.sendMessage(`📝 *Log*    [${shortId}]`, message);
+      await sendMessage(`📝 *Log*    [${shortId}]\n\n`+message, context.chatId);
       return message;
     },
     sendMessage: async (message) => {
-      await context.sendMessage(`🔧 *Action*    [${shortId}]`, message);
+      await sendMessage(`🔧 *Action*    [${shortId}]\n\n` + message, context.chatId);
     },
-    reply: async (message, customChatId) => {
-      await context.reply(`🔧 *Action*    `, message, customChatId);
+    reply: async (message, customChatId = context.chatId) => {
+      await replyToMessage(`🔧 *Action*    \n\n`+message, customChatId, context.rawMessage);
     },
-    deleteMessage: async (customChatId) => {
-      await context.deleteMessage(customChatId);
+    deleteMessage: async (customChatId = context.chatId) => {
+      await deleteMessage(customChatId, context.rawMessage.key);
     },
   };
 
   if (action.permissions?.useChatDb) {
+    // @ts-ignore - chatDb is dynamically added based on permissions
     actionContext.chatDb = getDb(`./pgdata/${actionName}`);
   }
   if (action.permissions?.useRootDb) {
+    // @ts-ignore - rootDb is dynamically added based on permissions
     actionContext.rootDb = getDb("./pgdata/root");
   }
   // if (action.permissions?.useFileSystem) { actionContext.directoryHandle = directoryHandle; }

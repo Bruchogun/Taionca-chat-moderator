@@ -191,6 +191,44 @@ async function getMessageContent(baileysMessage) {
   return content;
 }
 
+
+/** @type {(chatId, senderIds) => Promise<boolean>}*/
+  export async function getIsAdmin (chatId, senderIds){
+    if(!sock) throw new Error("WhatsApp socket not initialized");
+    const isGroup = !!chatId?.endsWith("@g.us");
+    if (!isGroup) return true; // In private chats, treat as admin
+    try {
+      const groupMetadata = await sock.groupMetadata(chatId);
+      const participant = groupMetadata.participants.find(
+        participant => senderIds.includes(participant.id)
+      );
+      return participant?.admin === "admin" || participant?.admin === "superadmin";
+    } catch (error) {
+      console.error("Error checking group admin status:", error);
+      return false;
+    }
+  }
+
+/** @type {(text: string, chatId: string) => Promise<void>}*/
+  export async function sendMessage (text, chatId){
+    if(!sock) throw new Error("WhatsApp socket not initialized");
+    await sock.sendMessage(chatId, { text });
+  }
+
+/** @type {(text: string, chatId: string, baileysMessage) => Promise<void>}*/
+  export async function replyToMessage (text, chatId, baileysMessage){
+    if(!sock) throw new Error("WhatsApp socket not initialized");
+    const quotedMessage = /** @type {WAMessage} */ (baileysMessage);
+    await sock.sendMessage(chatId, { text }, { quoted: quotedMessage });
+  }
+
+  /** @type {(chatId: string, messageKey: any) => Promise<void>}*/
+  export async function deleteMessage (chatId, messageKey){
+    if(!sock) throw new Error("WhatsApp socket not initialized");
+    await sock.sendMessage(chatId, { delete: messageKey });
+  }
+
+
 /**
  * Internal method to process incoming messages and create enriched context
  * @param {BaileysMessage} baileysMessage - Raw Baileys message
@@ -277,34 +315,7 @@ async function adaptIncomingMessage(baileysMessage, sock) {
     isGroup,
     groupName, // added groupName
     timestamp,
-
-    // High-level actions scoped to this message
-    getAdminStatus: async () => {
-      if (!isGroup) return "admin"; // In private chats, treat as admin
-      try {
-        const groupMetadata = await sock.groupMetadata(chatId);
-        const participant = groupMetadata.participants.find(
-          participant => senderIds.includes(participant.id)
-        );
-        return participant?.admin || null;
-      } catch (error) {
-        console.error("Error checking group admin status:", error);
-        return null;
-      }
-    },
-
-    sendMessage: async (text, customChatId) => {
-      await sock.sendMessage(customChatId || chatId, { text });
-    },
-
-    replyToMessage: async (text, customChatId = undefined) => {
-      const quotedMessage = /** @type {WAMessage} */ (baileysMessage);
-      await sock.sendMessage(customChatId || chatId, { text }, { quoted: quotedMessage });
-    },
-
-    deleteMessage: async (customChatId = undefined) => {
-      await sock.sendMessage(customChatId || chatId, { delete: messageKey });
-    },
+    rawMessage: baileysMessage,
 
     // Bot info
     selfIds: selfIds || [],

@@ -2,33 +2,18 @@
  * WhatsApp LLM Bot with JavaScript execution capabilities
  */
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
-import { shortenToolId } from "./utils.js";
-import { connectToWhatsApp } from "./whatsapp-adapter.js";
+import { connectToWhatsApp, replyToMessage } from "./whatsapp-adapter.js";
 import { initStore } from "./store.js";
 import { convertAudioToMp3Base64 } from "./audio_conversion.js";
+import { processLlmResponse } from "./aiCall.js";
 import './api.js'; // Importar y ejecutar la API
+import { retryQueuedMessages } from "./retryQueuedMessages.js";
 
 const { addMessage, closeDb, createChat, getChat, getMessages } = await initStore();
 
-const MAURO_IR_ID = config.MASTER_IDs[1]
-
-/**
- * Convert actions to Gemini tools format (keeping for backward compatibility but not used)
- * @param {Action[]} actions
- * @returns {Array}
- */
-function actionsToGeminiFormat(actions) {
-  return actions.map((action) => ({
-    functionDeclarations: [{
-      name: action.name,
-      description: action.description,
-      parameters: action.parameters,
-    }],
-  }));
-}
+export const MAURO_IR_ID = config.MASTER_IDs[1]
 
 /**
  * Handle incoming WhatsApp messages
@@ -40,6 +25,12 @@ export async function handleMessage(messageContext) {
 
   console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
 
+
+  async function reply(header, text, customChatId) {
+    const fullMessage = `${header}\n\n${text}`;
+    await replyToMessage(fullMessage, customChatId, messageContext.rawMessage);
+  }
+
   // Create legacy context for actions (maintains backward compatibility)
   /** @type {Context} */
   const context = {
@@ -47,28 +38,21 @@ export async function handleMessage(messageContext) {
     senderIds,
     content: content,
     groupName,
-    getIsAdmin: async () => {
-      const adminStatus = await messageContext.getAdminStatus();
-      return adminStatus === "admin" || adminStatus === "superadmin";
-    },
-    sendMessage: async (header, text, customChatId) => {
-      const fullMessage = `${header}\n\n${text}`;
-      await messageContext.sendMessage(fullMessage, customChatId);
-    },
-    reply: async (header, text, customChatId) => {
-      const fullMessage = `${header}\n\n${text}`;
-      await messageContext.replyToMessage(fullMessage, customChatId);
-    },
-    deleteMessage: async (customChatId) => {
-      await messageContext.deleteMessage(customChatId);
-    },
+    rawMessage: messageContext.rawMessage,
+    // sendMessage: async (header, text, customChatId) => {
+    //   const fullMessage = `${header}\n\n${text}`;
+    //   await messageContext.sendMessage(fullMessage, customChatId);
+    // },
+    // deleteMessage: async (customChatId) => {
+    //   await messageContext.deleteMessage(customChatId);
+    // },
   };
 
   // Load actions
   /** @type {Action[]} */
   const actions = await getActions();
 
-  const firstBlock = content.find(block=>block.type === "text")
+  const firstBlock = content.find(block => block.type === "text")
 
   if (firstBlock?.text?.startsWith("!")) {
     const [rawCommand, ...args] = firstBlock.text.slice(1).trim().split(" ");
@@ -77,7 +61,7 @@ export async function handleMessage(messageContext) {
     const action = actions.find(action => action.command === command);
 
     if (!action) {
-      await context.reply("❌ *Error*", `Unknown command: ${command}`,MAURO_IR_ID);
+      await reply("❌ *Error*", `Unknown command: ${command}`, MAURO_IR_ID);
       return;
     }
 
@@ -96,13 +80,13 @@ export async function handleMessage(messageContext) {
       const { result } = await executeAction(action.name, context, params);
 
       if (typeof result === "string") {
-        await context.reply(`⚡ *Command* !${command}`, result, MAURO_IR_ID);
+        await reply(`⚡ *Command* !${command}`, result, MAURO_IR_ID);
       }
     } catch (error) {
       console.error("Error executing command:", error);
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      await context.reply("❌ *Error*", `Error: ${errorMessage}`, MAURO_IR_ID);
+      await reply("❌ *Error*", `Error: ${errorMessage}`, MAURO_IR_ID);
     }
 
     return;
@@ -145,7 +129,7 @@ export async function handleMessage(messageContext) {
   }
 
   /** @type {UserMessage} */
-  const message = {role: "user", content}
+  const message = { role: "user", content }
 
   // Insert message into DB
   await addMessage(chatId, message, senderIds);
@@ -203,11 +187,11 @@ export async function handleMessage(messageContext) {
                     messageParts.push({ text: `> ${quoteBlock.text.trim().replace(/\n/g, '\n> ')}` });
                     break;
                   case "image":
-                    messageParts.push({ 
-                      inlineData: { 
+                    messageParts.push({
+                      inlineData: {
                         data: quoteBlock.data,
                         mimeType: quoteBlock.mime_type
-                      } 
+                      }
                     });
                     break;
                 }
@@ -217,11 +201,11 @@ export async function handleMessage(messageContext) {
               messageParts.push({ text: contentBlock.text });
               break;
             case "image":
-              messageParts.push({ 
-                inlineData: { 
+              messageParts.push({
+                inlineData: {
                   data: contentBlock.data,
                   mimeType: contentBlock.mime_type
-                } 
+                }
               });
               break;
             case "audio":
@@ -299,247 +283,20 @@ export async function handleMessage(messageContext) {
     }
   }
 
-  // Initialize LLM client
-  const genAI = new GoogleGenerativeAI(config.llm_api_key || "");
-  
-  // Configure the model with tools (deduplicate by name)
-  const seenNames = new Set();
-  /** @type {Action[]} */
-  const uniqueActions = [];
-  for (const action of actions) {
-    if (!seenNames.has(action.name)) {
-      seenNames.add(action.name);
-      uniqueActions.push(action);
-    }
-  }
-  
-  const toolsConfig = uniqueActions.length > 0 ? {
-    functionDeclarations: uniqueActions.map((action) => ({
-      name: action.name,
-      description: action.description,
-      parameters: {
-        type: "OBJECT",
-        properties: action.parameters.properties,
-        required: action.parameters.required,
-      },
-    }))
-  } : undefined;
+  // Call the modularized LLM response processor
 
-  const model = genAI.getGenerativeModel({ 
-    model: config.model,
-    systemInstruction: systemPrompt,
-    // @ts-ignore - Type mismatch with SchemaType
-    tools: toolsConfig ? [toolsConfig] : undefined,
-  });
-
-  async function processLlmResponse() {//Modularizar esto
-
-    let response;
-    try {
-      console.log(JSON.stringify(chatMessages_formatted, null, 2))
-      
-      // Start chat with history
-      const chat = model.startChat({
-        history: chatMessages_formatted.slice(0, -1), // All messages except the last one
-      });
-      
-      // Send the last message
-      const lastMessage = chatMessages_formatted[chatMessages_formatted.length - 1];
-      const result = await chat.sendMessage(lastMessage.parts);
-      response = result.response;
-    } catch (error) {
-      console.error(error);
-      const errorMessage = JSON.stringify(error, null, 2);
-      await context.reply(
-        "❌ *Error*",
-        "An error occurred while processing the message.\n\n" + errorMessage,
-        MAURO_IR_ID
-      );
-      return;
-    }
-
-    // Get response text (may be empty if only function calls)
-    let responseText = "";
-    try {
-      responseText = response.text();
-    } catch (e) {
-      // No text content, only function calls
-      console.log("No text content in response");
-    }
-    const functionCalls = response.functionCalls();
-
-    // Add assistant message to conversation context
-    /** @type {AssistantMessage} */
-    const assistantMessage = {
-      role: "assistant",
-      content: [],
-    };
-
-    if (responseText && responseText.trim()) {
-      console.log("RESPONSE SENT:", responseText);
-      // const filteredSenderId = senderIds.filter(x => x !== "unknown" && x.length < 14)[0] + "@s.whatsapp.net";
-      // await context.reply("🤖 *AI Assistant*", responseText, filteredSenderId);
-      assistantMessage.content.push({
-        type: "text",
-        text: responseText,
-      });
-    }
-
-
-    if (functionCalls && functionCalls.length > 0) {
-      // Add tool calls to assistant message
-      for (const functionCall of functionCalls) {
-        const toolId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        assistantMessage.content.push({
-          type: "tool",
-          tool_id: toolId,
-          name: functionCall.name,
-          arguments: JSON.stringify(functionCall.args)
-        })
-
-        // Show tool call to user
-        const shortId = shortenToolId(toolId);
-        // await context.sendMessage(
-        //   `🔧 *Executing* ${functionCall.name}    [${shortId}]`,
-        //   `parameters:\n\`\`\`\n${JSON.stringify(functionCall.args, null, 2)}\n\`\`\``,
-        //   MAURO_IR_ID
-        // );
-      }
-
-      // Store tool calls in database
-      await addMessage(chatId, assistantMessage, senderIds)
-
-      // Add assistant message with tool calls to conversation context
-      chatMessages_formatted.push({
-        role: "model",
-        parts: functionCalls.map(fc => ({
-          functionCall: {
-            name: fc.name,
-            args: fc.args
-          }
-        }))
-      });
-
-      let continueProcessing = false;
-
-      // Create a map of function names to tool IDs
-      const toolIdMap = new Map();
-      for (const content of assistantMessage.content) {
-        if (content.type === "tool") {
-          toolIdMap.set(content.name, content.tool_id);
-        }
-      }
-
-      for (const functionCall of functionCalls) {
-        const toolName = functionCall.name;
-        const toolArgs = { ...functionCall.args, groupName };// added groupName
-        const toolId = toolIdMap.get(toolName);
-        const shortId = shortenToolId(toolId);
-        console.log("executing", toolName, toolArgs);
-
-        try {
-          const functionResponse = await executeAction(
-            toolName,
-            context,
-            toolArgs,
-            toolId,
-          );
-          console.log("response", functionResponse);
-
-          if (toolName !== "new_conversation") {
-            // Store tool result in database
-            /** @type {ToolMessage} */
-            const toolMessage = {
-              role: "tool",
-              tool_id: toolId,
-              content: [{type: "text", text: JSON.stringify(functionResponse.result)}]
-            }
-            await addMessage(chatId, toolMessage, senderIds)
-          }
-
-          const resultMessage =
-            typeof functionResponse.result === "string"
-              ? functionResponse.result
-              : JSON.stringify(functionResponse.result, null, 2);
-          // Show tool result to user
-          // await context.sendMessage(
-          //   `✅ *Result*    [${shortId}]`,
-          //   resultMessage,
-          //   MAURO_IR_ID
-          // );
-
-          if (functionResponse.permissions.autoContinue) {
-            // If the tool result indicates to continue processing, set flag
-            continueProcessing = true;
-          }
-
-          // Add tool result to conversation context
-          chatMessages_formatted.push({
-            role: "function",
-            parts: [{
-              functionResponse: {
-                name: toolName,
-                response: {
-                  result: resultMessage
-                }
-              }
-            }]
-          });
-
-        } catch (error) {
-          console.error("Error executing tool:", error);
-          const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
-          // Store error as tool result
-          /** @type {ToolMessage} */
-          const toolError = {
-            role: "tool",
-            tool_id: toolId,
-            content: [{type: "text", text: errorMessage}],
-          }
-          await addMessage(chatId, toolError, senderIds)
-
-          // Show tool error to user
-          await context.sendMessage(
-            `❌ *Tool Error*    [${shortId}]`,
-            errorMessage,
-            MAURO_IR_ID
-          );
-
-          // Continue processing to selffix the error
-          continueProcessing = true;
-
-          // Add tool error to conversation context
-          chatMessages_formatted.push({
-            role: "function",
-            parts: [{
-              functionResponse: {
-                name: toolName,
-                response: {
-                  error: errorMessage
-                }
-              }
-            }]
-          });
-        }
-
-      }
-
-      // Recursively process LLM response after tool execution
-      if (continueProcessing) {
-        await processLlmResponse();
-      }
-    } else {
-      // Only add assistant message if no tool calls (to avoid duplicates)
-      if (assistantMessage.content.length > 0) {
-        await addMessage(chatId, assistantMessage, senderIds);
-      }
-    }
-  }
-
-  await processLlmResponse();
+  console.log(await processLlmResponse({
+    chatMessages_formatted,
+    context,
+    chatId,
+    senderIds,
+    groupName,
+    id_master: MAURO_IR_ID,
+    systemPrompt
+  }));
 }
 
-async function setup () {
+async function setup() {
   // Initialize everything
   const { closeWhatsapp } = await connectToWhatsApp(handleMessage)
     .catch(async (error) => {
@@ -548,9 +305,21 @@ async function setup () {
       process.exit(1);
     })
 
+  // Start retry queue interval after everything is initialized
+  console.log("Starting retry queue interval (every 60 seconds)...");
+  const retryInterval = setInterval(async () => {
+    try {
+      console.log("Retrying queued messages...");
+      await retryQueuedMessages();
+    } catch (error) {
+      console.error("Error in retry queue interval:", error);
+    }
+  }, 20000); // 1 minute
+
 
   async function cleanup() {
     try {
+      clearInterval(retryInterval);
       await closeWhatsapp();
       await closeDb();
     } catch (error) {
