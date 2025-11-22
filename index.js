@@ -11,7 +11,7 @@ import { processLlmResponse } from "./aiCall.js";
 import './api.js'; // Importar y ejecutar la API
 import { retryQueuedMessages } from "./retryQueuedMessages.js";
 
-const { addMessage, closeDb, createChat, getChat, getMessages } = await initStore();
+const { addMessage, closeDb, createChat, getChat, getMessages, getGroupNameDB } = await initStore();
 
 export const MAURO_IR_ID = config.MASTER_IDs[1]
 
@@ -21,7 +21,9 @@ export const MAURO_IR_ID = config.MASTER_IDs[1]
  * @returns {Promise<void>}
  */
 export async function handleMessage(messageContext) {
-  const { chatId, senderIds, content, isGroup, senderName, selfIds, mentions, groupName } = messageContext; // added groupName
+  const { chatId, senderIds, content, isGroup, senderName, selfIds, mentions } = messageContext;
+
+  const groupName = await getGroupNameDB(chatId);
 
   console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
 

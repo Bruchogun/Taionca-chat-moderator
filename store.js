@@ -1,4 +1,5 @@
 import { getDb } from "./db.js";
+import { getGroupName } from "./whatsapp-adapter.js";
 
 /**
  * @typedef {{
@@ -22,7 +23,7 @@ import { getDb } from "./db.js";
  *   context: Context,
  *   chatId: string,
  *   senderIds: string[],
- *   groupName: string,
+ *   groupName: string | null,
  *   addMessage: (chatId: string, message: Message, senderIds: string[]) => Promise<any>,
  *   id_master: string,
  *   systemPrompt: string,
@@ -41,6 +42,7 @@ export async function initStore(){
             chat_id VARCHAR(50) PRIMARY KEY,
             is_enabled BOOLEAN DEFAULT FALSE,
             system_prompt TEXT,
+            name TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `;
@@ -66,6 +68,7 @@ export async function initStore(){
             id_master TEXT NOT NULL,
             systemPrompt TEXT NOT NULL,
             error TEXT,
+            is_proccessed BOOLEAN DEFAULT FALSE,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `;
@@ -82,6 +85,7 @@ export async function initStore(){
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_name`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_args`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS content`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS name TEXT`,
       ]);
     } catch (error) {
       // Ignore errors if columns already exist
@@ -149,13 +153,18 @@ export async function initStore(){
       },
 
       async getQueuedMessages(limit = 10) {
-        const { rows } = await db.sql`SELECT * FROM queued_messages ORDER BY queued_message_id ASC LIMIT ${limit}`;
+        const { rows } = await db.sql`SELECT * FROM queued_messages WHERE is_proccessed = FALSE ORDER BY queued_message_id ASC LIMIT ${limit}`;
         return (rows);
       },
 
       async deleteQueuedMessage(queued_message_id) {
-        const { rows } = await db.sql`DELETE FROM queued_messages WHERE queued_message_id = ${queued_message_id} RETURNING *`;
+        const { rows } = await db.sql`UPDATE queued_messages SET is_proccessed = TRUE WHERE queued_message_id = ${queued_message_id} RETURNING *`;
         return (rows);
       },
+
+      async getGroupNameDB(chatId) {
+        const { rows: [group] } = await db.sql`SELECT name FROM chats WHERE chat_id = ${chatId}`;
+        return group.name || await getGroupName(chatId);
+      }
     }
 }

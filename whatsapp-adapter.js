@@ -192,6 +192,16 @@ async function getMessageContent(baileysMessage) {
 }
 
 
+  export async function getGroupName(chatId){
+    if (!sock) throw new Error("WhatsApp socket not initialized");
+    const groupMetadata = await sock.groupMetadata(chatId).catch(err => {
+      console.error("Error fetching group metadata:", err);
+      return null;
+    });
+    return groupMetadata?.subject || null;
+  }
+
+
 /** @type {(chatId, senderIds) => Promise<boolean>}*/
   export async function getIsAdmin (chatId, senderIds){
     if(!sock) throw new Error("WhatsApp socket not initialized");
@@ -294,17 +304,6 @@ async function adaptIncomingMessage(baileysMessage, sock) {
     if (lid) selfIds.push(lid);
   }
 
-  // Get group name if in a group // added groupName
-  let groupName = "";
-  if (isGroup) {
-    try {
-      const groupMetadata = await sock.groupMetadata(chatId);
-      groupName = groupMetadata.subject || "";
-    } catch (error) {
-      console.error("Error getting group name:", error);
-    }
-  }
-
   /** @type {IncomingContext} */
   const messageContext = {
     // Message data
@@ -313,7 +312,6 @@ async function adaptIncomingMessage(baileysMessage, sock) {
     senderName: baileysMessage.pushName || "",
     content: content,
     isGroup,
-    groupName, // added groupName
     timestamp,
     rawMessage: baileysMessage,
 
@@ -354,8 +352,14 @@ export async function connectToWhatsApp(onMessageHandler) {
       if (qr) {
         exec(`echo "${qr}" | qrencode -t ansiutf8`, (error, stdout, stderr) => {
           if (error) {
-            console.error(error);
-            console.error(stderr);
+            // qrencode not available, display QR code as plain text
+            console.log(error)
+            console.log(stderr)
+            console.log('\n=== WhatsApp QR Code ===');
+            console.log(qr);
+            console.log('========================\n');
+            console.log('Scan this QR code with WhatsApp to login.');
+            console.log('Tip: Install qrencode for a better visual experience.');
             return;
           }
           console.log(stdout);

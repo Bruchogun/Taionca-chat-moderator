@@ -16,11 +16,11 @@ export async function retryQueuedMessages() {
             await processLlmResponse({
                 chatMessages_formatted: queuedMessage.chatmessages_formatted,
                 context: queuedMessage.context,
-                chatId: queuedMessage.chatId,
-                senderIds: queuedMessage.senderIds,
-                groupName: queuedMessage.groupName,
+                chatId: queuedMessage.chatid,
+                senderIds: queuedMessage.senderids,
+                groupName: queuedMessage.groupname,
                 id_master: queuedMessage.id_master,
-                systemPrompt: queuedMessage.systemPrompt
+                systemPrompt: queuedMessage.systemprompt
             });
             await deleteQueuedMessage(queuedMessage.queued_message_id);
         } catch (error) {

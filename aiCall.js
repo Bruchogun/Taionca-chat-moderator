@@ -17,7 +17,7 @@ const { addMessageToQueue, addMessage } = await initStore();
  *   context: Context,
  *   chatId: string,
  *   senderIds: string[],
- *   groupName: string,
+ *   groupName: string | null,
  *   id_master: string,
  *   systemPrompt: string
  * }} params
@@ -80,6 +80,11 @@ export async function processLlmResponse({
     
     // Send the last message
     const lastMessage = chatMessages_formatted[chatMessages_formatted.length - 1];
+    console.log("SENDING MESSAGE TO LLM:--------------------------------\n\n");
+    console.log(lastMessage.parts)
+    console.log("--------------------------------------------------------\n\n");
+    console.log("History", chatMessages_formatted.slice(0, -1))
+    console.log("System Prompt:\n\n", systemPrompt);
     const result = await chat.sendMessage(lastMessage.parts);
     response = result.response;
   } catch (error) {

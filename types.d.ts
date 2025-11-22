@@ -74,7 +74,6 @@ type IncomingContext = {
   senderName: string;
   content: IncomingContentBlock[];
   isGroup: boolean;
-  groupName: string; // added groupName
   timestamp: Date;
   rawMessage: BaileysMessage;
 
@@ -91,7 +90,7 @@ type Context = {
   chatId: string;
   senderIds: string[];
   content: IncomingContentBlock[];
-  groupName: string;
+  groupName: string | null;
   rawMessage: BaileysMessage;
   // getIsAdmin: () => Promise<boolean>;
   // sendMessage: (header: string, message: string, customChatId?: string) => Promise<void>;
@@ -106,7 +105,7 @@ type ActionContext = {
   chatId: string;
   senderIds: string[];
   content: IncomingContentBlock[];
-  groupName: string;
+  groupName: string | null;
   getIsAdmin: () => Promise<boolean>;
   sessionDb: PGlite;
   getActions: () => Promise<Action[]>;
