@@ -15,6 +15,8 @@ Si por algún motivo no logras ejecutar parseData, debes ejecutar la acción del
 
 export default {
   MASTER_IDs: process.env.MASTER_ID?.split(',') || "",
+  CEO_IDs: process.env.CEO_ID?.split(',') || [],
+  CEO_WEBHOOK_URL: process.env.CEO_WEBHOOK_URL || "",
   model: process.env.MODEL || "gpt-4.1",
   llm_api_key: process.env.LLM_API_KEY,
   base_url: process.env.BASE_URL,

@@ -10,6 +10,7 @@ import { convertAudioToMp3Base64 } from "./audio_conversion.js";
 import { processLlmResponse } from "./aiCall.js";
 import './api.js'; // Importar y ejecutar la API
 import { retryQueuedMessages } from "./retryQueuedMessages.js";
+import { handleCeoMessage } from "./ceoHandler.js";
 
 const { addMessage, closeDb, createChat, getChat, getMessages, getGroupNameDB } = await initStore();
 
@@ -26,6 +27,9 @@ export async function handleMessage(messageContext) {
   const groupName = await getGroupNameDB(chatId);
 
   console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
+
+  // Check for CEO message and handle it
+  await handleCeoMessage(messageContext);
 
 
   async function reply(header, text, customChatId) {
@@ -316,7 +320,7 @@ async function setup() {
     } catch (error) {
       console.error("Error in retry queue interval:", error);
     }
-  }, 20000); // 1 minute
+  }, 60000); // 1 minute
 
 
   async function cleanup() {

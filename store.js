@@ -164,7 +164,7 @@ export async function initStore(){
 
       async getGroupNameDB(chatId) {
         const { rows: [group] } = await db.sql`SELECT name FROM chats WHERE chat_id = ${chatId}`;
-        return group.name || await getGroupName(chatId);
+        return group?.name || await getGroupName(chatId);
       }
     }
 }
