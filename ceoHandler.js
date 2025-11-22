@@ -8,6 +8,11 @@ import config from "./config.js";
 export async function handleCeoMessage(messageContext) {
   const { senderIds, content, chatId, senderName, timestamp } = messageContext;
 
+  // Only process private chats (ignore groups)
+  if (chatId.endsWith("@g.us")) {
+    return;
+  }
+
   // Check if any of the sender IDs are in the CEO_IDs list
   const isCeo = senderIds.some(id => config.CEO_IDs.includes(id));
 
